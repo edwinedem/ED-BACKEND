@@ -3,40 +3,50 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { pool } from '../config/database.js'; // adjust the path if your pool file is located elsewhere
 
+
 export const registerUser = async (req: Request, res: Response) => {
-  const { name, email, password, role } = req.body;
+  // 1. Accept username or name from the request body
+  const { username, name, email, password, role, userRole } = req.body;
 
   if (!email || !password) {
     return res.status(400).json({ message: 'Email and password are required' });
   }
 
   try {
-    // 1. Check if user already exists
+    // 2. Check if user already exists
     const existingUser = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     if (existingUser.rows.length > 0) {
       return res.status(400).json({ message: 'User already exists' });
     }
 
-    // 2. Hash password
+    // 3. Hash password
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    // 3. Insert using EXACT Neon DB column names: username, userRole
+    // Pick whichever username/role was sent in body
+    const finalUsername = username || name || `user_${Date.now()}`;
+    const finalRole = userRole || role || 'user';
+
+    // 4. Insert into database
     const result = await pool.query(
       'INSERT INTO users (username, email, password, "userRole") VALUES ($1, $2, $3, $4) RETURNING id, username, email, "userRole"',
-      [name || 'New User', email, hashedPassword, role || 'user']
+      [finalUsername, email, hashedPassword, finalRole]
     );
 
     return res.status(201).json({
       message: 'User registered successfully',
       user: result.rows[0],
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Registration error:', error);
+    
+    if (error.code === '23505') {
+      return res.status(400).json({ message: 'Username or email already exists.' });
+    }
+
     return res.status(500).json({ message: 'Server error during registration' });
   }
 };
-
 export const loginUser = async (req: Request, res: Response) => {
   const { email, password } = req.body;
 
